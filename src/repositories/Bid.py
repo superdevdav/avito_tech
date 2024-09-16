@@ -1,3 +1,5 @@
+import uuid
+
 from typing import List, Dict, Any
 
 from schemas.db.config_db import new_session
@@ -15,7 +17,7 @@ class BidRepository:
                               description=data['description'],
                               status='Created',
                               tenderId=data['tenderId'],
-                              authorType=data['AuthorType'],
+                              authorType=data['authorType'],
                               authorId=data['authorId']
                         )
 
@@ -43,19 +45,23 @@ class BidRepository:
       async def get_user_bids(username, limit, offset) -> List[BidORM]:
             try:
                   async with new_session() as session:
-                        query = text('SELECT * FROM bids JOIN employee ON employee.username = bids."creatorUsername" WHERE employee.username = :username ORDER BY name LIMIT :limit OFFSET :offset;')
-                        result = await session.execute(query, {'username': username, 'limit': limit, 'offset': offset})
-                        bids_list = [BidORM(
-                              id = i[0],
-                              name = i[1],
-                              description = i[2],
-                              status = i[4],
-                              tenderId = i[5],
-                              organizationId = i[5],
-                              creatorUsername = i[6],
-                              created_at = i[7],
-                              updated_at = i[8]
-                        ) for i in result.fetchall()]
+
+                        base_query = 'SELECT * FROM bids WHERE bids."authorId" = '
+                        base_query += '(SELECT id FROM employee WHERE employee.username = ' f"'{username}') "
+                        base_query += 'ORDER BY bids.name LIMIT :limit OFFSET :offset;'
+
+                        query = text(base_query)
+
+                        result = await session.execute(query, {'limit': limit, 'offset': offset})
+                        bids_list = [{
+                                    'id': i[0],
+                                    'name': i[1],
+                                    'status': i[3],
+                                    'authorType': i[4],
+                                    'authorId': i[5],
+                                    'version': i[6],
+                                    'created_at': i[9]
+                              } for i in result.fetchall()]
                         return bids_list
             except SQLAlchemyError as e:
                   raise ValueError(f"Database error: {str(e)}")
@@ -68,17 +74,15 @@ class BidRepository:
                   async with new_session() as session:
                         query = text('SELECT * FROM bids JOIN tenders ON tenders.id = bids."tenderId" WHERE tenders.id = :id ORDER BY bids.name LIMIT :limit OFFSET :offset;')
                         result = await session.execute(query, {'id': id, 'limit': limit, 'offset': offset})
-                        bids_list = [BidORM(
-                              id = i[0],
-                              name = i[1],
-                              description = i[2],
-                              status = i[4],
-                              tenderId = i[5],
-                              organizationId = i[5],
-                              creatorUsername = i[6],
-                              created_at = i[7],
-                              updated_at = i[8]
-                        ) for i in result.fetchall()]
+                        bids_list = [{
+                              'id': i[0],
+                              'name': i[1],
+                              'status': i[3],
+                              'authorType': i[4],
+                              'authorId': i[5],
+                              'version': i[6],
+                              'created_at': i[9]
+                        } for i in result.fetchall()]
                         return bids_list
             except SQLAlchemyError as e:
                   raise ValueError(f"Database error: {str(e)}")
@@ -95,18 +99,15 @@ class BidRepository:
                         
                         query = text('SELECT * FROM bids WHERE id = :id;')
                         result = await session.execute(query, {'id': bidId})
-                        bids_list = [BidORM(
-                              id = bidId,
-                              name = i[1],
-                              description = i[2],
-                              status = i[3],
-                              version = i[4],
-                              tenderId = i[5],
-                              organizationId = i[6],
-                              creatorUsername = i[7],
-                              created_at = i[8],
-                              updated_at = i[9]
-                        ) for i in result.fetchall()]
+                        bids_list = [{
+                              'id': i[0],
+                              'name': i[1],
+                              'status': i[3],
+                              'authorType': i[4],
+                              'authorId': i[5],
+                              'version': i[6],
+                              'created_at': i[9]
+                        } for i in result.fetchall()]
 
                         return bids_list[0]
             except SQLAlchemyError as e:
@@ -123,9 +124,11 @@ class BidRepository:
                         query = text('UPDATE bids SET decision = :decision WHERE id = :id;')
 
                         await session.execute(query, {'decision': decision, 'id': id})
-                        await session.commit()
+                        
+                        query = text('SELECT * FROM bids WHERE id = :id;')
+                        result = await session.execute(query, {'id': id})
 
-                        return True
+                        return result.fetchall()[0]
             except SQLAlchemyError as e:
                   raise ValueError(f"Database error: {str(e)}")
             except KeyError as e:
@@ -151,14 +154,18 @@ class BidRepository:
                   raise ValueError(f"Unexpected error: {str(e)}")
 
       @staticmethod
-      async def submit_bid_feedback(id: str, username: str, feedback: str):
+      async def submit_bid_feedback(bidId: str, username: str, feedback: str):
             try:
                   async with new_session() as session:
-                        query = text('INSERT INTO bids_reviews (username, description, bidId) VALUES (:username, :description, :id);')
+                        insert_query = text('INSERT INTO bids_reviews (id, "userName", description, "bidId") VALUES (:reviewId, :username, :description, :bidId);')
 
-                        result = await session.execute(query, {'id': id, 'username': username, 'description': feedback})
+                        await session.execute(insert_query, {'reviewId': uuid.uuid4(), 'bidId': bidId, 'username': username, 'description': feedback})
+                        await session.commit()
+                        
+                        select_query = text('SELECT * FROM bids WHERE id = :id;')
+                        result = await session.execute(select_query, {'id': bidId})
 
-                        return result.scalar()
+                        return result.fetchall()[0]
             except SQLAlchemyError as e:
                   raise ValueError(f"Database error: {str(e)}")
             except KeyError as e:
@@ -171,12 +178,25 @@ class BidRepository:
             try:
                   async with new_session() as session:
 
-                        check_query = text('SELECT id FROM bids WHERE "creatorUsername" = :username;')
+                        check_query = text('SELECT id FROM employee WHERE username = :username;')
                         result = await session.execute(check_query, {'username': username})
-                        bid_id = result.scalar()
+                        user_id = result.scalar()
 
-                        if bid_id is None:
-                              return 401
+                        return user_id
 
             except Exception as e:
-                  raise ValueError(f"Unexpected error: {str(e)}")
+                  raise ValueError(f"Unexpected error: {str(e)}")    
+
+      @staticmethod
+      async def user_exists_by_id(id: str):
+            try:
+                  async with new_session() as session:
+
+                        check_query = text('SELECT username FROM employee WHERE id = :id;')
+                        result = await session.execute(check_query, {'id': id})
+                        username = result.scalar()
+
+                        return username
+
+            except Exception as e:
+                  raise ValueError(f"Unexpected error: {str(e)}")    

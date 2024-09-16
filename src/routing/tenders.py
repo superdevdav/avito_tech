@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, status, Query, Request
+from fastapi import APIRouter, HTTPException, status, Query
 from fastapi.responses import JSONResponse
 from typing import List, Optional, Literal
 
@@ -61,16 +61,6 @@ tenders_router = APIRouter()
                               }
                         }
                   }
-            },
-            404: {
-                  'description': 'Предложение не найдено.',
-                  "content": {
-                  "application/json": {
-                        'example': {
-                                    "reason": "<объяснение, почему запрос пользователя не может быть обработан>"
-                              }
-                        }
-                  }
             }
       } 
 )
@@ -88,6 +78,10 @@ async def createTender(
                   "creatorUsername": request_body.creatorUsername
             }
             
+            creator_id = await TenderRepository.user_exists(request_body.creatorUsername)
+            if creator_id:
+                  raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='User does not exist or invalid')
+
             id = await TenderRepository.create_tender(params)
             if id:
                   return JSONResponse(content={'id': str(id),
@@ -98,8 +92,12 @@ async def createTender(
                                             'organizationId': params['organizationId'],
                                             'creatorUsername': params['creatorUsername']
                                             }, status_code=status.HTTP_200_OK)
+      except ValueError as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+      except PermissionError:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
       except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 @tenders_router.get('/tenders',
             responses={
@@ -131,16 +129,6 @@ async def createTender(
                         }
                   }
             },
-            401: {
-                  'description': 'Пользователь не существует или некорректен.',
-                  "content": {
-                  "application/json": {
-                        'example': {
-                                    "reason": "<объяснение, почему запрос пользователя не может быть обработан>"
-                              }
-                        }
-                  }
-            },
             403: {
                   'description': 'Недостаточно прав для выполнения действия.',
                   "content": {
@@ -164,16 +152,22 @@ async def createTender(
       }                      
 )
 async def getTenders(
-      service_type: Optional[List[Literal['Construction', 'Delivery', 'Manufacture']]] = None,
-      limit: Optional[int] = Query(5, alias="limit"),
+      service_type: Optional[List[Literal['Construction', 'Delivery', 'Manufacture']]] = Query(None),
+      limit: Optional[int] = Query(5, max_length=50, alias="limit"),
       offset: Optional[int] = Query(0, alias="offset"),
       ):
       try:
             tenders = await TenderRepository.get_all_tenders(limit=limit, offset=offset, service_type=service_type)
             tenders = sorted(tenders, key=lambda t: t.name)
-            return tenders
+            
+            if tenders:
+                  return tenders
+            else:
+                  raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Tenders not found')
       except ValueError as e:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+      except PermissionError:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
       except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
@@ -241,17 +235,25 @@ async def getTenders(
 )
 async def getUserTenders(
       username: Optional[str] = None,
-      limit: Optional[int] = Query(5, alias="limit"),
+      limit: Optional[int] = Query(5, max_length=50, alias="limit"),
       offset: Optional[int] = Query(0, alias="offset")
       ):
       try:
-            result = await TenderRepository.user_exists(username)
-            if not result:
+            user_id = await TenderRepository.user_exists(username)
+            if not user_id:
                   raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='User does not exist or invalid')
 
             tenders = await TenderRepository.get_user_tenders(username, limit=limit, offset=offset)
             tenders = sorted(tenders, key=lambda t: t.name)
-            return tenders
+            
+            if tenders:
+                  return tenders
+            else:
+                  raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Tenders not found')
+      except HTTPException as e:
+            raise e
+      except PermissionError:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
       except ValueError as e:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
       except Exception as e:
@@ -323,8 +325,8 @@ async def editTender(
       request_body: TenderRequestModel
       ):
       try:
-            result = await TenderRepository.user_exists(username)
-            if not result:
+            user_id = await TenderRepository.user_exists(username)
+            if not user_id:
                   raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='User does not exist or invalid')
 
             params = {'name': request_body.name, 'description': request_body.description, 'serviceType': request_body.serviceType}
@@ -343,8 +345,12 @@ async def editTender(
                                                }, status_code=status.HTTP_200_OK)
             else:
                   raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Not found')
+      except HTTPException as e:
+            raise e
+      except PermissionError:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
       except ValueError as e:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
       except Exception as e:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
@@ -405,12 +411,19 @@ async def getTenderStatus(
       username: Optional[str] = None
       ):
       try:
-            result = await TenderRepository.user_exists(username)
-            if not result:
+            user_id = await TenderRepository.user_exists(username)
+            if not user_id:
                   raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='User does not exist or invalid')
 
             tender_status = await TenderRepository.get_tender_status(tenderId)
-            return JSONResponse(content=tender_status, status_code=status.HTTP_200_OK)
+            if tender_status:
+                  return JSONResponse(content=tender_status, status_code=status.HTTP_200_OK)
+            else:
+                  raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Tender not found')
+      except HTTPException as e:
+            raise e
+      except PermissionError:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
       except ValueError as e:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
       except Exception as e:

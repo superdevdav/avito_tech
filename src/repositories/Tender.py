@@ -4,7 +4,6 @@ from schemas.db.config_db import new_session
 from schemas.db.models import TenderORM
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.sql import text
-from sqlalchemy import bindparam
 
 class TenderRepository:
       @staticmethod
@@ -43,9 +42,15 @@ class TenderRepository:
                               'offset': offset
                         }
 
-                        if service_type:
-                              base_query += 'WHERE "serviceType" IN :service_type '
-                              params['service_type'] = tuple(service_type) if isinstance(service_type, list) else (service_type,)
+                        service_type_sql = None
+                        if service_type and isinstance(service_type, list):
+                              service_type_sql = '('
+                              for i in range(len(service_type)):
+                                    if i != len(service_type) - 1:
+                                          service_type_sql += f"'{str(service_type[i])}', "
+                                    else:
+                                          service_type_sql += f"'{str(service_type[i])}')"
+                              base_query += f'WHERE "serviceType" IN {service_type_sql} '
 
                         base_query += 'ORDER BY name LIMIT :limit OFFSET :offset;'
                         
@@ -154,10 +159,9 @@ class TenderRepository:
 
                         check_query = text('SELECT id FROM employee WHERE username = :username;')
                         result = await session.execute(check_query, {'username': username})
-                        tender_id = result.scalar()
+                        user_id = result.scalar()
 
-                        if tender_id is None:
-                              return 401
+                        return user_id
 
             except Exception as e:
                   raise ValueError(f"Unexpected error: {str(e)}")
