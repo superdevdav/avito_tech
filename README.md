@@ -1,5 +1,5 @@
 # Сервис проведения тендеров
 
 ## Запуск сервиса
-```docker-compose up -d```
+```docker-compose up -d```\
 Работает по адресу localhost: 8080
