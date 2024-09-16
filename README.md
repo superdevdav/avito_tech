@@ -18,16 +18,23 @@ PATCH ```/bids/{bidId}/edit``` - изменения данных о предло
 PUT ```/bids/{bidId}/submit_decision``` - добавление решения по предложению\
 PUT ```/bids/{bidId}/feedback``` - добавление комментария по предложению\
 
-## Добавил файл .env-non-dev, для взаимодействия с БД в контейнере
+### Добавил файл .env-non-dev, для взаимодействия с БД в контейнере
 
 ## Стек
-ЯП: Python\
-Фрэймворки: FastAPI, SQLAlchemy, Pydantic\
-БД: PostgreSQL\
-а также Docker, Postman
+####ЯП:#### Python\
+####Фрэймворки:#### FastAPI, SQLAlchemy, Pydantic\
+####БД:#### PostgreSQL\
+####а также#### Docker, Postman
 
 ## Структура проекта
 ```
 src
-  routing  
+  routing (контроллеры)
+  schemas (модели БД, Pydantic)
+  repositories (репозитории)
+  config.py
+  main.py
+.env-non-dev
+Dockerfile
+docker-compose.yml
 ```
