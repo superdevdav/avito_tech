@@ -2,3 +2,4 @@
 
 ## Запуск сервиса
 ```docker-compose up -d```
+Работает по адресу localhost: 8080
